@@ -118,9 +118,9 @@ def generate_pdf():
                 print(f"Signature error: {e}")
                 temp_sig_path = None
 
-        # Generate PDF with REDUCED margins
-        filename = f"MNHC_Claim_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
-        doc = SimpleDocTemplate(filename, pagesize=A4,
+        # Generate PDF in memory
+        pdf_buffer = io.BytesIO()
+        doc = SimpleDocTemplate(pdf_buffer, pagesize=A4,
                               rightMargin=1*cm, leftMargin=1*cm,
                               topMargin=1*cm, bottomMargin=0.8*cm)
 
@@ -236,24 +236,13 @@ def generate_pdf():
             elements.append(Spacer(1, 0.4*cm))
             elements.append(RLImage(temp_sig_path, width=6*cm, height=1.5*cm))
 
+        # Build PDF in memory
         doc.build(elements)
 
-        # Send file
-        response = send_file(filename, as_attachment=True,
-                           download_name=f"MNHC_Claim_{data.get('manager_name', 'User')}.pdf")
-
-        # Clean up files after sending
-        @response.call_on_close
-        def cleanup():
-            try:
-                if os.path.exists(filename):
-                    os.remove(filename)
-                if temp_sig_path and os.path.exists(temp_sig_path):
-                    os.remove(temp_sig_path)
-            except:
-                pass
-
-        return response
+        # Send PDF as response
+        pdf_buffer.seek(0)
+        return send_file(pdf_buffer, as_attachment=True,
+                       download_name=f"MNHC_Claim_{data.get('manager_name', 'User')}.pdf")
 
     except Exception as e:
         # Clean up on error
