@@ -102,21 +102,18 @@ def calculate():
 
 @app.route('/generate_pdf', methods=['POST'])
 def generate_pdf():
-    temp_sig_path = None
     try:
         data = request.form
 
         # Process signature
         signature_data = data.get('signature', '')
+        sig_image = None
         if signature_data and ',' in signature_data:
             try:
                 img_data = base64.b64decode(signature_data.split(',')[1])
                 sig_image = Image.open(io.BytesIO(img_data))
-                temp_sig_path = f"temp_sig_{datetime.now().strftime('%Y%m%d%H%M%S')}.png"
-                sig_image.save(temp_sig_path)
             except Exception as e:
                 print(f"Signature error: {e}")
-                temp_sig_path = None
 
         # Generate PDF in memory
         pdf_buffer = io.BytesIO()
@@ -232,9 +229,12 @@ def generate_pdf():
         elements.append(info_table)
 
         # Add Signature if exists
-        if temp_sig_path and os.path.exists(temp_sig_path):
+        if sig_image:
+            sig_image_io = io.BytesIO()
+            sig_image.save(sig_image_io, format='PNG')
+            sig_image_io.seek(0)
             elements.append(Spacer(1, 0.4*cm))
-            elements.append(RLImage(temp_sig_path, width=6*cm, height=1.5*cm))
+            elements.append(RLImage(sig_image_io, width=6*cm, height=1.5*cm))
 
         # Build PDF in memory
         doc.build(elements)
@@ -245,12 +245,6 @@ def generate_pdf():
                        download_name=f"MNHC_Claim_{data.get('manager_name', 'User')}.pdf")
 
     except Exception as e:
-        # Clean up on error
-        try:
-            if temp_sig_path and os.path.exists(temp_sig_path):
-                os.remove(temp_sig_path)
-        except:
-            pass
         return str(e), 500
 
 if __name__ == '__main__':
