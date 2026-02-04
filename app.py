@@ -9,62 +9,53 @@ from PIL import Image
 import io
 import base64
 import os
+import hashlib
 
 app = Flask(__name__)
 
-# Capping Configuration
+# ---------- CAPPING & RATES ----------
 CAPS = {
-    'opd': 1100,
-    'anc': 200,
-    'pnc': 50,
-    'del': 30,
-    'tb': 30,
-    'epi': 200,
-    'nut': 250,
-    'ppfp': 20,
-    'short': 60,
-    'long': 30
+    'opd': 1100, 'anc': 200, 'pnc': 50, 'del': 30, 'tb': 30,
+    'epi': 200, 'nut': 250, 'ppfp': 20, 'short': 60, 'long': 30
 }
-
 RATES = {
-    'opd': 400,
-    'anc': 600,
-    'pnc': 200,
-    'del': 6500,
-    'tb': 200,
-    'epi': 100,
-    'nut': 200,
-    'ppfp': 300,
-    'short': 150,
-    'long': 400
+    'opd': 400, 'anc': 600, 'pnc': 200, 'del': 6500, 'tb': 200,
+    'epi': 100, 'nut': 200, 'ppfp': 300, 'short': 150, 'long': 400
 }
 
-# Simulated Ad Database
+# ---------- ADS ----------
 ADS_DB = {
     'Faisalabad': {'text': 'Advertise Here - Reach 3000+ Health Managers contact smartbiopk@gmail.com', 'link': '#'},
     'Lahore': {'text': 'Advertise Here - Reach 3000+ Health Managers smartbiopk@gmail.com', 'link': '#'},
     'default': {'text': 'Advertise Here - Reach 3000+ Health Managers smartbiopk@gmail.com', 'link': '/advertise'}
 }
 
+# ---------- HELPERS ----------
 def format_date_ddmmyyyy(date_str):
-    """Convert YYYY-MM-DD to DD/MM/YYYY format"""
-    if not date_str or date_str == '':
-        return ''
+    if not date_str: return ''
     try:
-        # Parse the date (HTML date inputs come as YYYY-MM-DD)
-        date_obj = datetime.strptime(date_str, '%Y-%m-%d')
-        # Return as DD/MM/YYYY
-        return date_obj.strftime('%d/%m/%Y')
+        return datetime.strptime(date_str, '%Y-%m-%d').strftime('%d/%m/%Y')
     except:
-        # If already in different format or invalid, return as-is
         return date_str
 
+# ---------- LOG SYSTEM ----------
+LOG_DIR = "logs"
+os.makedirs(LOG_DIR, exist_ok=True)
+
+def _log_claim(district: str, total: int, year_month: str) -> None:
+    """Append one privacy-safe line to monthly log file"""
+    file_path = os.path.join(LOG_DIR, f"{year_month}.txt")
+    date_str = datetime.utcnow().strftime("%d/%m/%Y %H:%M:%S")
+    anon_id = hashlib.sha256(str(datetime.utcnow().timestamp()).encode()).hexdigest()[:8]
+    line = f"{date_str}\t{district}\t{total}\t{anon_id}\n"
+    with open(file_path, "a", encoding="utf-8") as f:
+        f.write(line)
+
+# ---------- ROUTES ----------
 @app.route('/')
 def index():
     district = request.args.get('district', 'default')
     ad = ADS_DB.get(district, ADS_DB['default'])
-
-    # Complete list of all 36 districts of Punjab, Pakistan
     districts = [
         'Attock', 'Bahawalnagar', 'Bahawalpur', 'Bhakkar', 'Chakwal', 'Chiniot',
         'Dera Ghazi Khan', 'Faisalabad', 'Gujranwala', 'Gujrat', 'Hafizabad',
@@ -74,38 +65,59 @@ def index():
         'Rajanpur', 'Rawalpindi', 'Sahiwal', 'Sargodha', 'Sheikhupura',
         'Sialkot', 'Toba Tek Singh', 'Vehari'
     ]
-
-    return render_template('index.html', ad=ad, districts=districts, selected_district=district)
+    # Build month/year lists for admin selector
+    now = datetime.utcnow()
+    years = list(range(2020, now.year + 2))          # 2020-2026
+    months = list(range(1, 13))                      # 1-12
+    sel_year = request.args.get('year', now.year, type=int)
+    sel_month = request.args.get('month', now.month, type=int)
+    return render_template("index.html", ad=ad, districts=districts, selected_district=district,
+                         years=years, months=months, sel_year=sel_year, sel_month=sel_month)
 
 @app.route('/calculate', methods=['POST'])
 def calculate():
-    """AJAX endpoint for real-time calculation"""
     data = request.json
-    results = {}
-    total = 25000
-
+    results, total = {}, 25000
     for key, rate in RATES.items():
-        val = int(data.get(key, 0) or 0)
-        cap = CAPS[key]
-        actual = min(val, cap)
+        val = int(data.get(key, 0))
+        actual = min(val, CAPS[key])
         amount = actual * rate
         total += amount
-        results[key] = {
-            'amount': amount,
-            'capped': val > cap,
-            'entered': val,
-            'cap': cap
-        }
-
+        results[key] = {'amount': amount, 'capped': val > CAPS[key], 'entered': val, 'cap': CAPS[key]}
     results['total'] = total
     return jsonify(results)
 
+# ---------- ADMIN ----------
+@app.route('/admin')
+def admin_panel():
+    sel_year = request.args.get('year', datetime.utcnow().year, type=int)
+    sel_month = request.args.get('month', datetime.utcnow().month, type=int)
+    year_month = f"{sel_year}-{sel_month:02d}"
+    file_path = os.path.join(LOG_DIR, f"{year_month}.txt")
+    lines = open(file_path, encoding="utf-8").readlines() if os.path.exists(file_path) else []
+    total_claims = len(lines)
+    total_amount = sum(int(line.split("\t")[2]) for line in lines) if lines else 0
+    return render_template("admin.html", year=sel_year, month=sel_month,
+                         years=list(range(2020, datetime.utcnow().year + 2)),
+                         months=list(range(1, 13)), total_claims=total_claims,
+                         total_amount=total_amount)
+
+@app.route('/download-log')
+def download_log():
+    year = request.args.get('year', datetime.utcnow().year, type=int)
+    month = request.args.get('month', datetime.utcnow().month, type=int)
+    year_month = f"{year}-{month:02d}"
+    file_path = os.path.join(LOG_DIR, f"{year_month}.txt")
+    if not os.path.exists(file_path):
+        return "No data for selected month.", 404
+    return send_file(file_path, as_attachment=True,
+                    download_name=f"MNHC-Claims-{year_month}.txt")
+
+# ---------- PDF GENERATION ----------
 @app.route('/generate_pdf', methods=['POST'])
 def generate_pdf():
     try:
         data = request.form
-
-        # Process signature
         signature_data = data.get('signature', '')
         sig_image = None
         if signature_data and ',' in signature_data:
@@ -113,14 +125,13 @@ def generate_pdf():
                 img_data = base64.b64decode(signature_data.split(',')[1])
                 sig_image = Image.open(io.BytesIO(img_data))
             except Exception as e:
-                print(f"Signature error: {e}")
+                print("Signature error:", e)
 
-        # Generate PDF in memory
+        # Build PDF in memory
         pdf_buffer = io.BytesIO()
         doc = SimpleDocTemplate(pdf_buffer, pagesize=A4,
                               rightMargin=1*cm, leftMargin=1*cm,
                               topMargin=1*cm, bottomMargin=0.8*cm)
-
         elements = []
         styles = getSampleStyleSheet()
 
@@ -130,27 +141,25 @@ def generate_pdf():
                                    fontName='Helvetica-Bold')
         elements.append(Paragraph("Claim/Expenses Payment Form - Maryam Nawaz Health Clinic", title_style))
 
-        # Format dates to DD/MM/YYYY
+        # Dates
         period_start = format_date_ddmmyyyy(data.get('period_start', ''))
         period_end = format_date_ddmmyyyy(data.get('period_end', ''))
         claim_date = format_date_ddmmyyyy(data.get('date', ''))
 
-        # Certification - 12pt
+        # Certification
         cert_style = ParagraphStyle('Cert', parent=styles['Normal'],
                                   fontSize=12, leading=16, spaceAfter=12)
         cert = f"""It is certified that the following healthcare services have been provided at Mariam Nawaz Health Clinic <b>{data.get('clinic_name', '')}</b> under the supervision of the undersigned Health Manager during the period <b>{period_start}</b> to <b>{period_end}</b>."""
         elements.append(Paragraph(cert, cert_style))
 
-        # Calculate values with capping
-        values = {}
-        total = 25000
+        # Calculate & table
+        values, total = {}, 25000
         for key in RATES:
-            val = int(data.get(key, 0) or 0)
+            val = int(data.get(key, 0))
             actual = min(val, CAPS[key])
             values[key] = actual * RATES[key]
             total += values[key]
 
-        # Table
         table_data = [
             ['Sr.#', 'Services/Visit Type', 'Patients', 'Unit (PKR)', 'Total (PKR)'],
             ['1', 'OPD (Medicines Dispensed)', data.get('opd', '0'), '400', f"{values['opd']:,}"],
@@ -168,10 +177,7 @@ def generate_pdf():
             ['', 'Total Claims/Expenses', '', '', f"{total:,}"]
         ]
 
-        table = Table(table_data,
-                     colWidths=[1.3*cm, 8.5*cm, 2.4*cm, 2.8*cm, 3.5*cm],
-                     rowHeights=[0.9*cm] + [0.75*cm]*12 + [0.9*cm])
-
+        table = Table(table_data, colWidths=[1.3*cm, 8.5*cm, 2.4*cm, 2.8*cm, 3.5*cm], rowHeights=[0.9*cm] + [0.75*cm]*12 + [0.9*cm])
         table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2E7D32')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
@@ -193,10 +199,8 @@ def generate_pdf():
         elements.append(table)
         elements.append(Spacer(1, 0.5*cm))
 
-        # Declaration - 12pt
-        decl_style = ParagraphStyle('Decl', parent=styles['Normal'],
-                                  fontSize=12, leading=16, alignment=4,
-                                  spaceBefore=10, spaceAfter=10)
+        # Declaration
+        decl_style = ParagraphStyle('Decl', parent=styles['Normal'], fontSize=12, leading=16, alignment=4, spaceBefore=10, spaceAfter=10)
         decl = """The above-mentioned claims/expenses are calculated as per contract, patient data entered in Electronic Medical Record (EMR), program guidelines and patients treated under my supervision. This bill is submitted for payment of claims/expenses (as per fixed rates under signed contract) to undersigned and official record.<br/><br/>
         Undersigned authorize competent authority to withhold/deduct amount from total claim, if any discrepancy/duplication found against patient visit entered in EMR."""
         elements.append(Paragraph(decl, decl_style))
@@ -209,11 +213,7 @@ def generate_pdf():
             ['IBAN Account Number:', data.get('iban', ''), '', ''],
             ['District:', data.get('district', ''), 'Signature & Stamp:', '']
         ]
-
-        info_table = Table(info_data,
-                          colWidths=[4.5*cm, 7*cm, 2.5*cm, 5*cm],
-                          rowHeights=[0.8*cm]*5)
-
+        info_table = Table(info_data, colWidths=[4.5*cm, 7*cm, 2.5*cm, 5*cm], rowHeights=[0.8*cm]*5)
         info_table.setStyle(TableStyle([
             ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
             ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
@@ -228,24 +228,29 @@ def generate_pdf():
         ]))
         elements.append(info_table)
 
-        # Add Signature if exists
+        # Signature
         if sig_image:
-            sig_image_io = io.BytesIO()
-            sig_image.save(sig_image_io, format='PNG')
-            sig_image_io.seek(0)
+            sig_buffer = io.BytesIO()
+            sig_image.save(sig_buffer, format='PNG')
+            sig_buffer.seek(0)
             elements.append(Spacer(1, 0.4*cm))
-            elements.append(RLImage(sig_image_io, width=6*cm, height=1.5*cm))
+            elements.append(RLImage(sig_buffer, width=6*cm, height=1.5*cm))
 
-        # Build PDF in memory
+        # Build PDF
         doc.build(elements)
 
-        # Send PDF as response
+        # ----------  LOG THIS CLAIM  (monthly analytics)  ----------
+        year_month = datetime.utcnow().strftime("%Y-%m")
+        _log_claim(data.get('district', 'unknown'), int(total))
+
+        # Return PDF
         pdf_buffer.seek(0)
         return send_file(pdf_buffer, as_attachment=True,
-                       download_name=f"MNHC_Claim_{data.get('manager_name', 'User')}.pdf")
+                        download_name=f"MNHC_Claim_{data.get('manager_name', 'User')}.pdf")
 
     except Exception as e:
         return str(e), 500
 
+# ---------- RUN ----------
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
