@@ -1,7 +1,7 @@
 * {
-box-sizing: border-box;
-margin: 0;
-padding: 0;
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
 }
 
 body {
@@ -245,12 +245,12 @@ td.indent {
 }
 
 #sigCanvas {
-border: 2px solid #333;
-background: white;
-cursor: crosshair;
-touch-action: none; /* Prevent scrolling while signing on mobile */
-max-width: 100%;
-height: auto;
+    border: 2px solid #333;
+    background: white;
+    cursor: crosshair;
+    touch-action: none; /* Prevent scrolling while signing on mobile */
+    max-width: 100%;
+    height: auto;
 }
 
 .clear-btn {
@@ -309,4 +309,15 @@ height: auto;
         margin: 5px 0;
         display: block;
     }
+}
+
+/* Privacy Disclaimer Box */
+.disclaimer-box {
+    background: #e8f5e9;
+    border-left: 4px solid #2E7D32;
+    padding: 8px 12px;
+    margin: 15px 0;
+    font-size: 13px;
+    color: #2E7D32;
+    border-radius: 4px;
 }
