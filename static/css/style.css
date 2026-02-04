@@ -1,0 +1,312 @@
+* {
+box-sizing: border-box;
+margin: 0;
+padding: 0;
+}
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: #f5f5f5;
+    color: #333;
+    line-height: 1.4;
+}
+
+/* Ad Banners */
+.ad-banner {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 12px;
+    text-align: center;
+    font-size: 14px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+}
+
+.ad-banner.bottom-ad {
+    position: relative;
+    margin: 20px 0;
+    border-radius: 8px;
+}
+
+.ad-btn {
+    background: #fff;
+    color: #667eea;
+    padding: 4px 12px;
+    border-radius: 20px;
+    text-decoration: none;
+    font-weight: bold;
+    margin-left: 10px;
+    font-size: 12px;
+}
+
+.container {
+    max-width: 800px;
+    margin: 0 auto;
+    background: white;
+    padding: 20px;
+    box-shadow: 0 0 10px rgba(0,0,0,0.1);
+    min-height: 100vh;
+}
+
+header {
+    text-align: center;
+    margin-bottom: 20px;
+    border-bottom: 3px solid #2E7D32;
+    padding-bottom: 10px;
+}
+
+header h1 {
+    font-size: 20px;
+    color: #2E7D32;
+    margin-bottom: 5px;
+}
+
+header h2 {
+    font-size: 16px;
+    color: #666;
+    font-weight: normal;
+}
+
+/* District Selector */
+.district-bar {
+    background: #e8f5e9;
+    padding: 10px;
+    border-radius: 5px;
+    margin-bottom: 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.district-bar select {
+    padding: 5px 10px;
+    border: 1px solid #2E7D32;
+    border-radius: 4px;
+    font-size: 14px;
+}
+
+/* Certification Section */
+.cert-section {
+    background: #f9f9f9;
+    padding: 15px;
+    border-left: 4px solid #2E7D32;
+    margin-bottom: 20px;
+    font-size: 14px;
+    line-height: 1.6;
+}
+
+.cert-section input[type="text"],
+.cert-section input[type="date"] {
+    border: none;
+    border-bottom: 1px solid #333;
+    padding: 2px 5px;
+    margin: 0 3px;
+    width: 120px;
+    font-family: inherit;
+}
+
+/* Table Styles */
+.table-container {
+    overflow-x: auto;
+    margin-bottom: 20px;
+    border: 1px solid #ddd;
+    border-radius: 5px;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+th {
+    background: #2E7D32;
+    color: white;
+    padding: 10px 5px;
+    text-align: left;
+    font-weight: 600;
+}
+
+td {
+    padding: 8px 5px;
+    border-bottom: 1px solid #eee;
+    border-right: 1px solid #eee;
+}
+
+tr:nth-child(even) {
+    background: #f9f9f9;
+}
+
+tr.section-header {
+    background: #e8f5e9;
+    font-weight: bold;
+}
+
+tr.total-row {
+    background: #2E7D32;
+    color: white;
+    font-size: 14px;
+}
+
+td.indent {
+    padding-left: 20px;
+}
+
+.cap {
+    display: block;
+    font-size: 10px;
+    color: #666;
+    font-weight: normal;
+}
+
+/* Input Fields in Table */
+.calc-input {
+    width: 60px;
+    padding: 5px;
+    border: 1px solid #ccc;
+    border-radius: 3px;
+    text-align: center;
+    font-size: 13px;
+}
+
+.amount {
+    text-align: right;
+    font-weight: 600;
+    color: #2E7D32;
+}
+
+.amount.capped {
+    color: #d32f2f;
+    font-weight: bold;
+}
+
+/* Declaration */
+.declaration {
+    font-size: 12px;
+    text-align: justify;
+    margin-bottom: 20px;
+    padding: 15px;
+    background: #fafafa;
+    border: 1px solid #eee;
+    border-radius: 5px;
+}
+
+.declaration p {
+    margin-bottom: 10px;
+}
+
+/* Form Grid */
+.form-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 15px;
+    margin-bottom: 20px;
+}
+
+@media (min-width: 600px) {
+    .form-grid {
+        grid-template-columns: 1fr 1fr;
+    }
+}
+
+.form-group {
+    display: flex;
+    flex-direction: column;
+}
+
+.form-group label {
+    font-weight: bold;
+    font-size: 13px;
+    margin-bottom: 5px;
+    color: #555;
+}
+
+.form-group input {
+    padding: 8px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    font-size: 14px;
+}
+
+/* Signature Section */
+.signature-section {
+    margin: 20px 0;
+}
+
+.signature-box {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    margin-top: 10px;
+}
+
+#sigCanvas {
+border: 2px solid #333;
+background: white;
+cursor: crosshair;
+touch-action: none; /* Prevent scrolling while signing on mobile */
+max-width: 100%;
+height: auto;
+}
+
+.clear-btn {
+    background: #f44336;
+    color: white;
+    border: none;
+    padding: 8px 15px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+}
+
+.clear-btn:hover {
+    background: #d32f2f;
+}
+
+/* Submit Button */
+.submit-btn {
+    width: 100%;
+    background: #2E7D32;
+    color: white;
+    border: none;
+    padding: 15px;
+    font-size: 16px;
+    font-weight: bold;
+    border-radius: 5px;
+    cursor: pointer;
+    margin-top: 20px;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+}
+
+.submit-btn:hover {
+    background: #1b5e20;
+    transform: translateY(-1px);
+    box-shadow: 0 6px 8px rgba(0,0,0,0.15);
+}
+
+/* Mobile Optimization */
+@media (max-width: 480px) {
+    header h1 { font-size: 18px; }
+    header h2 { font-size: 14px; }
+
+    th, td {
+        padding: 6px 3px;
+        font-size: 12px;
+    }
+
+    .calc-input {
+        width: 50px;
+        padding: 3px;
+    }
+
+    .cert-section input[type="text"],
+    .cert-section input[type="date"] {
+        width: 100%;
+        margin: 5px 0;
+        display: block;
+    }
+}

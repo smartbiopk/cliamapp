@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MNHC Claim Calculator</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <!-- Pharma Ad Banner (Top) -->
+    <div class="ad-banner top-ad">
+        <div class="ad-content">
+            <strong>🧪 Sponsored:</strong> {{ ad.text }}
+            <a href="{{ ad.link }}" class="ad-btn">Learn More</a>
+        </div>
+    </div>
+
+    <div class="container">
+        <header>
+            <h1>Claim/Expenses Payment Form</h1>
+            <h2>Maryam Nawaz Health Clinic</h2>
+        </header>
+
+        <!-- District Selector (For Ad Targeting) -->
+        <div class="district-bar">
+            <label>Select District for Localized Offers:</label>
+            <select id="district-select" onchange="changeDistrict()">
+                {% for d in districts %}
+                <option value="{{ d }}" {% if d == selected_district %}selected{% endif %}>{{ d }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <form id="claimForm" method="POST" action="/generate_pdf">
+            <!-- Hidden district field -->
+            <input type="hidden" name="district" id="district-hidden" value="{{ selected_district }}">
+
+            <!-- Certification Section -->
+            <div class="cert-section">
+                <p>It is certified that the following healthcare services have been provided at Mariam Nawaz Health Clinic
+                <input type="text" name="clinic_name" placeholder="Clinic Name" required>
+                under the supervision of the undersigned Health Manager during the period
+                <input type="date" name="period_start" required> to
+                <input type="date" name="period_end" required>.</p>
+            </div>
+
+            <!-- Calculator Table -->
+            <div class="table-container">
+                <table id="claimTable">
+                    <thead>
+                        <tr>
+                            <th>Sr.#</th>
+                            <th>Services/Visit Type</th>
+                            <th>No. of Patients</th>
+                            <th>Unit Cost</th>
+                            <th>Total Cost (PKR)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>1</td>
+                            <td>OPD (Medicines Dispensed) <span class="cap">Max: 1100</span></td>
+                            <td><input type="number" name="opd" class="calc-input" data-rate="400" data-cap="1100" min="0"></td>
+                            <td>400</td>
+                            <td class="amount" id="amt-opd">0</td>
+                        </tr>
+                        <tr>
+                            <td>2</td>
+                            <td>Antenatal Care (ANC) <span class="cap">Max: 200</span></td>
+                            <td><input type="number" name="anc" class="calc-input" data-rate="600" data-cap="200" min="0"></td>
+                            <td>600</td>
+                            <td class="amount" id="amt-anc">0</td>
+                        </tr>
+                        <tr>
+                            <td>3</td>
+                            <td>Postnatal Care (PNC) <span class="cap">Max: 50</span></td>
+                            <td><input type="number" name="pnc" class="calc-input" data-rate="200" data-cap="50" min="0"></td>
+                            <td>200</td>
+                            <td class="amount" id="amt-pnc">0</td>
+                        </tr>
+                        <tr>
+                            <td>4</td>
+                            <td>Normal Deliveries <span class="cap">Max: 30</span></td>
+                            <td><input type="number" name="del" class="calc-input" data-rate="6500" data-cap="30" min="0"></td>
+                            <td>6,500</td>
+                            <td class="amount" id="amt-del">0</td>
+                        </tr>
+                        <tr>
+                            <td>5</td>
+                            <td>TB Patients Checked <span class="cap">Max: 30</span></td>
+                            <td><input type="number" name="tb" class="calc-input" data-rate="200" data-cap="30" min="0"></td>
+                            <td>200</td>
+                            <td class="amount" id="amt-tb">0</td>
+                        </tr>
+                        <tr>
+                            <td>6</td>
+                            <td>EPI Vaccination <span class="cap">Max: 200</span></td>
+                            <td><input type="number" name="epi" class="calc-input" data-rate="100" data-cap="200" min="0"></td>
+                            <td>100</td>
+                            <td class="amount" id="amt-epi">0</td>
+                        </tr>
+                        <tr>
+                            <td>7</td>
+                            <td>Treatment & Nutrition <span class="cap">Max: 250</span></td>
+                            <td><input type="number" name="nut" class="calc-input" data-rate="200" data-cap="250" min="0"></td>
+                            <td>200</td>
+                            <td class="amount" id="amt-nut">0</td>
+                        </tr>
+                        <tr>
+                            <td>8</td>
+                            <td>Post-Partum FP <span class="cap">Max: 20</span></td>
+                            <td><input type="number" name="ppfp" class="calc-input" data-rate="300" data-cap="20" min="0"></td>
+                            <td>300</td>
+                            <td class="amount" id="amt-ppfp">0</td>
+                        </tr>
+                        <tr class="section-header">
+                            <td>9</td>
+                            <td colspan="4"><strong>Family Planning Services</strong></td>
+                        </tr>
+                        <tr>
+                            <td></td>
+                            <td class="indent">Short-Acting Methods <span class="cap">Max: 60</span></td>
+                            <td><input type="number" name="short" class="calc-input" data-rate="150" data-cap="60" min="0"></td>
+                            <td>150</td>
+                            <td class="amount" id="amt-short">0</td>
+                        </tr>
+                        <tr>
+                            <td></td>
+                            <td class="indent">Long-Acting Methods <span class="cap">Max: 30</span></td>
+                            <td><input type="number" name="long" class="calc-input" data-rate="400" data-cap="30" min="0"></td>
+                            <td>400</td>
+                            <td class="amount" id="amt-long">0</td>
+                        </tr>
+                        <tr>
+                            <td>10</td>
+                            <td>Repair & Maintenance</td>
+                            <td>-</td>
+                            <td>-</td>
+                            <td>25,000</td>
+                        </tr>
+                        <tr class="total-row">
+                            <td colspan="4"><strong>Total Claims/Expenses</strong></td>
+                            <td><strong id="grand-total">25,000</strong></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Declaration -->
+            <div class="declaration">
+                <p>The above-mentioned claims/expenses are calculated as per contract, patient data entered in Electronic Medical Record (EMR), program guidelines and patients treated under my supervision. This bill is submitted for payment of claims/expenses (as per fixed rates under signed contract) to undersigned and official record.</p>
+                <p>Undersigned authorize competent authority to withhold/deduct amount from total claim, if any discrepancy/duplication found against patient visit entered in EMR.</p>
+            </div>
+
+            <!-- Bottom Inputs -->
+            <div class="form-grid">
+                <div class="form-group">
+                    <label>Health Manager Name:</label>
+                    <input type="text" name="manager_name" required>
+                </div>
+                <div class="form-group">
+                    <label>CNIC:</label>
+                    <input type="text" name="cnic" pattern="[0-9]{13}" placeholder="13 digits without dashes">
+                </div>
+                <div class="form-group">
+                    <label>Account Title:</label>
+                    <input type="text" name="account_title" required>
+                </div>
+                <div class="form-group">
+                    <label>Account Number (IBAN):</label>
+                    <input type="text" name="iban" required>
+                </div>
+                <div class="form-group">
+                    <label>MNHC Name:</label>
+                    <input type="text" name="mnhc_name" required>
+                </div>
+                <div class="form-group">
+                    <label>Date:</label>
+                    <input type="date" name="date" required>
+                </div>
+            </div>
+
+            <!-- Signature Section -->
+            <div class="signature-section">
+                <label>Digital Signature:</label>
+                <div class="signature-box">
+                    <canvas id="sigCanvas" width="350" height="90"></canvas>
+                    <button type="button" class="clear-btn" onclick="clearSignature()">Clear Box</button>
+                </div>
+                <input type="hidden" name="signature" id="signatureData">
+            </div>
+
+            <!-- Pharma Ad (Bottom - Before Submit) -->
+            <div class="ad-banner bottom-ad">
+                <div class="ad-content">
+                    <strong>💊 Local Pharma Special:</strong> Order medicines in bulk for your clinic.
+                    <a href="#" class="ad-btn">View Catalog</a>
+                </div>
+            </div>
+
+            <button type="submit" class="submit-btn">Generate PDF Claim</button>
+        </form>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/signature.js') }}"></script>
+    <script>
+        // Real-time Calculation Logic
+        document.querySelectorAll('.calc-input').forEach(input => {
+            input.addEventListener('input', calculateTotals);
+        });
+
+        function calculateTotals() {
+            let grandTotal = 25000; // Maintenance
+
+            document.querySelectorAll('.calc-input').forEach(input => {
+                const rate = parseInt(input.dataset.rate);
+                const cap = parseInt(input.dataset.cap);
+                const val = parseInt(input.value) || 0;
+                const actual = Math.min(val, cap);
+                const amount = actual * rate;
+
+                // Display amount
+                const key = input.name;
+                const amtCell = document.getElementById('amt-' + key);
+                amtCell.textContent = amount.toLocaleString();
+
+                // Visual feedback: Red if capped
+                if (val > cap) {
+                    amtCell.classList.add('capped');
+                    amtCell.title = `Capped at ${cap} (entered: ${val})`;
+                } else {
+                    amtCell.classList.remove('capped');
+                    amtCell.title = '';
+                }
+
+                grandTotal += amount;
+            });
+
+            document.getElementById('grand-total').textContent = grandTotal.toLocaleString();
+        }
+
+        function changeDistrict() {
+            const district = document.getElementById('district-select').value;
+            document.getElementById('district-hidden').value = district;
+            // Reload page with new district (for ad targeting)
+            window.location.href = '/?district=' + district;
+        }
+
+        // Form submission - capture signature
+        document.getElementById('claimForm').addEventListener('submit', function(e) {
+            const canvas = document.getElementById('sigCanvas');
+            document.getElementById('signatureData').value = canvas.toDataURL();
+        });
+    </script>
+</body>
+</html>
