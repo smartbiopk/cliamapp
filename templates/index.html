@@ -193,7 +193,7 @@
             <!-- Privacy Disclaimer -->
             <div class="disclaimer-box">
                 <small>
-                    🔒 <strong>Privacy Note:</strong> No personal user data is stored on our servers.
+                    🔒 <strong>Privacy Note:</strong> No personal patient data is stored on our servers. 
                     All information remains on your device and is included only in the PDF you download.
                 </small>
             </div>
@@ -208,6 +208,11 @@
 
             <button type="submit" class="submit-btn">Generate PDF Claim</button>
         </form>
+    </div>
+
+    <!-- Admin quick-link (tiny, bottom-center) -->
+    <div style="text-align:center; margin-top:30px; font-size:11px;">
+        <a href="/admin" style="color:#999;">Admin</a>
     </div>
 
     <script src="{{ url_for('static', filename='js/signature.js') }}"></script>
