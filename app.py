@@ -10,8 +10,7 @@ import io
 import base64
 import os
 import hashlib
-from vercel.kv import kv
-import os, datetime as dt, hashlib
+import json
 
 app = Flask(__name__)
 
@@ -32,32 +31,134 @@ ADS_DB = {
     'default': {'text': 'Advertise Here - Reach 3000+ Health Managers smartbiopk@gmail.com', 'link': '/advertise'}
 }
 
+# ---------- ANALYTICS STORAGE ----------
+# Use /tmp for Vercel serverless (only writable directory)
+# For persistent storage, we'll use a JSON file in /tmp (resets on cold start but works for single session)
+# For production, you should use Vercel KV or a database
+ANALYTICS_FILE = "/tmp/mnhc_analytics.json"
+
+def _init_analytics():
+    """Initialize analytics file if it doesn't exist"""
+    if not os.path.exists(ANALYTICS_FILE):
+        with open(ANALYTICS_FILE, 'w') as f:
+            json.dump({
+                'page_views': [],
+                'calculations': [],
+                'pdf_generations': [],
+                'district_stats': {},
+                'monthly_claims': {}
+            }, f)
+
+def _log_event(event_type, data):
+    """Log an analytics event"""
+    try:
+        _init_analytics()
+        with open(ANALYTICS_FILE, 'r') as f:
+            analytics = json.load(f)
+        
+        timestamp = datetime.utcnow().isoformat()
+        event_data = {
+            'timestamp': timestamp,
+            'date': datetime.utcnow().strftime('%Y-%m-%d'),
+            'time': datetime.utcnow().strftime('%H:%M:%S'),
+            'month': datetime.utcnow().strftime('%Y-%m'),
+            'year': datetime.utcnow().year,
+            'type': event_type
+        }
+        event_data.update(data)
+        
+        if event_type == 'page_view':
+            analytics['page_views'].append(event_data)
+        elif event_type == 'calculation':
+            analytics['calculations'].append(event_data)
+        elif event_type == 'pdf_generation':
+            analytics['pdf_generations'].append(event_data)
+        
+        # Update district stats
+        district = data.get('district', 'unknown')
+        if district not in analytics['district_stats']:
+            analytics['district_stats'][district] = {'views': 0, 'calculations': 0, 'pdfs': 0, 'total_amount': 0}
+        
+        if event_type == 'page_view':
+            analytics['district_stats'][district]['views'] += 1
+        elif event_type == 'calculation':
+            analytics['district_stats'][district]['calculations'] += 1
+            analytics['district_stats'][district]['total_amount'] += data.get('total', 0)
+        elif event_type == 'pdf_generation':
+            analytics['district_stats'][district]['pdfs'] += 1
+        
+        # Monthly aggregation
+        month_key = datetime.utcnow().strftime('%Y-%m')
+        if month_key not in analytics['monthly_claims']:
+            analytics['monthly_claims'][month_key] = {'count': 0, 'total_amount': 0, 'districts': {}}
+        
+        if event_type in ['calculation', 'pdf_generation']:
+            analytics['monthly_claims'][month_key]['count'] += 1
+            analytics['monthly_claims'][month_key]['total_amount'] += data.get('total', 0)
+            if district not in analytics['monthly_claims'][month_key]['districts']:
+                analytics['monthly_claims'][month_key]['districts'][district] = 0
+            analytics['monthly_claims'][month_key]['districts'][district] += 1
+        
+        with open(ANALYTICS_FILE, 'w') as f:
+            json.dump(analytics, f, indent=2)
+            
+    except Exception as e:
+        print(f"Analytics error: {e}")
+
+def _get_analytics_summary():
+    """Get summary for pharma presentation"""
+    try:
+        _init_analytics()
+        with open(ANALYTICS_FILE, 'r') as f:
+            analytics = json.load(f)
+        
+        total_views = len(analytics['page_views'])
+        total_calcs = len(analytics['calculations'])
+        total_pdfs = len(analytics['pdf_generations'])
+        unique_districts = len([d for d in analytics['district_stats'].keys() if d != 'unknown'])
+        
+        # Calculate active users (last 30 days)
+        recent_cutoff = datetime.utcnow().timestamp() - (30 * 24 * 60 * 60)
+        active_users = len(set([
+            pv.get('district', 'unknown') 
+            for pv in analytics['page_views'] 
+            if datetime.fromisoformat(pv['timestamp']).timestamp() > recent_cutoff
+        ]))
+        
+        return {
+            'total_page_views': total_views,
+            'total_calculations': total_calcs,
+            'total_pdfs_generated': total_pdfs,
+            'unique_districts_active': unique_districts,
+            'monthly_active_districts': active_users,
+            'district_breakdown': analytics['district_stats'],
+            'monthly_trends': analytics['monthly_claims']
+        }
+    except Exception as e:
+        return {'error': str(e)}
+
 # ---------- HELPERS ----------
 def format_date_ddmmyyyy(date_str):
-    if not date_str: return ''
+    if not date_str: 
+        return ''
     try:
         return datetime.strptime(date_str, '%Y-%m-%d').strftime('%d/%m/%Y')
     except:
         return date_str
-
-# ---------- LOG SYSTEM ----------
-LOG_DIR = "logs"
-os.makedirs(LOG_DIR, exist_ok=True)
-
-def _log_claim(district: str, total: int, year_month: str) -> None:
-    """Append one privacy-safe line to monthly log file"""
-    file_path = os.path.join(LOG_DIR, f"{year_month}.txt")
-    date_str = datetime.utcnow().strftime("%d/%m/%Y %H:%M:%S")
-    anon_id = hashlib.sha256(str(datetime.utcnow().timestamp()).encode()).hexdigest()[:8]
-    line = f"{date_str}\t{district}\t{total}\t{anon_id}\n"
-    with open(file_path, "a", encoding="utf-8") as f:
-        f.write(line)
 
 # ---------- ROUTES ----------
 @app.route('/')
 def index():
     district = request.args.get('district', 'default')
     ad = ADS_DB.get(district, ADS_DB['default'])
+    
+    # Log page view analytics (privacy-safe)
+    _log_event('page_view', {
+        'district': district,
+        'ip_hash': hashlib.sha256(request.remote_addr.encode()).hexdigest()[:16],  # anonymized
+        'user_agent': request.user_agent.string[:50] if request.user_agent else 'unknown'
+    })
+    
     districts = [
         'Attock', 'Bahawalnagar', 'Bahawalpur', 'Bhakkar', 'Chakwal', 'Chiniot',
         'Dera Ghazi Khan', 'Faisalabad', 'Gujranwala', 'Gujrat', 'Hafizabad',
@@ -67,59 +168,187 @@ def index():
         'Rajanpur', 'Rawalpindi', 'Sahiwal', 'Sargodha', 'Sheikhupura',
         'Sialkot', 'Toba Tek Singh', 'Vehari'
     ]
-    # Build month/year lists for admin selector
+    
+    # Build month/year lists
     now = datetime.utcnow()
-    years = list(range(2020, now.year + 2))          # 2020-2026
-    months = list(range(1, 13))                      # 1-12
+    years = list(range(2020, now.year + 2))
+    months = list(range(1, 13))
     sel_year = request.args.get('year', now.year, type=int)
     sel_month = request.args.get('month', now.month, type=int)
-    return render_template("index.html", ad=ad, districts=districts, selected_district=district,
-                         years=years, months=months, sel_year=sel_year, sel_month=sel_month)
+    
+    return render_template("index.html", ad=ad, districts=districts, 
+                          selected_district=district,
+                          years=years, months=months, 
+                          sel_year=sel_year, sel_month=sel_month)
 
 @app.route('/calculate', methods=['POST'])
 def calculate():
-    data = request.json
-    results, total = {}, 25000
-    for key, rate in RATES.items():
-        val = int(data.get(key, 0))
-        actual = min(val, CAPS[key])
-        amount = actual * rate
-        total += amount
-        results[key] = {'amount': amount, 'capped': val > CAPS[key], 'entered': val, 'cap': CAPS[key]}
-    results['total'] = total
-    return jsonify(results)
+    try:
+        data = request.json
+        results, total = {}, 25000
+        
+        for key, rate in RATES.items():
+            val = int(data.get(key, 0))
+            actual = min(val, CAPS[key])
+            amount = actual * rate
+            total += amount
+            results[key] = {
+                'amount': amount, 
+                'capped': val > CAPS[key], 
+                'entered': val, 
+                'cap': CAPS[key]
+            }
+        results['total'] = total
+        
+        # Log calculation analytics
+        _log_event('calculation', {
+            'district': data.get('district', 'unknown'),
+            'total': total,
+            'services_used': [k for k in RATES.keys() if int(data.get(k, 0)) > 0]
+        })
+        
+        return jsonify(results)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
-# ---------- ADMIN ----------
-@app.route('/admin')
-def admin_panel():
-    sel_year = request.args.get('year', datetime.utcnow().year, type=int)
-    sel_month = request.args.get('month', datetime.utcnow().month, type=int)
-    year_month = f"{sel_year}-{sel_month:02d}"
-    file_path = os.path.join(LOG_DIR, f"{year_month}.txt")
-    lines = open(file_path, encoding="utf-8").readlines() if os.path.exists(file_path) else []
-    total_claims = len(lines)
-    total_amount = sum(int(line.split("\t")[2]) for line in lines) if lines else 0
-    return render_template("admin.html", year=sel_year, month=sel_month,
-                         years=list(range(2020, datetime.utcnow().year + 2)),
-                         months=list(range(1, 13)), total_claims=total_claims,
-                         total_amount=total_amount)
+# ---------- ANALYTICS DASHBOARD ----------
+@app.route('/analytics')
+def analytics_dashboard():
+    """Public analytics dashboard for pharma companies"""
+    summary = _get_analytics_summary()
+    
+    # Create a nice HTML dashboard
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>MNHC Platform Analytics</title>
+        <style>
+            body {{ font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }}
+            .container {{ max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
+            h1 {{ color: #2E7D32; border-bottom: 3px solid #2E7D32; padding-bottom: 10px; }}
+            .stats-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin: 30px 0; }}
+            .stat-card {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 8px; text-align: center; }}
+            .stat-number {{ font-size: 2.5em; font-weight: bold; margin: 10px 0; }}
+            table {{ width: 100%; border-collapse: collapse; margin: 20px 0; }}
+            th, td {{ padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }}
+            th {{ background: #2E7D32; color: white; }}
+            tr:hover {{ background: #f5f5f5; }}
+            .footer {{ margin-top: 40px; padding-top: 20px; border-top: 1px solid #ddd; color: #666; font-size: 0.9em; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>📊 MNHC Health Platform - Usage Analytics</h1>
+            <p style="color: #666; font-size: 1.1em;">
+                Real-time platform engagement metrics for pharmaceutical advertising partners
+            </p>
+            
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div>Total Page Views</div>
+                    <div class="stat-number">{summary.get('total_page_views', 0):,}</div>
+                </div>
+                <div class="stat-card" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);">
+                    <div>Claims Calculated</div>
+                    <div class="stat-number">{summary.get('total_calculations', 0):,}</div>
+                </div>
+                <div class="stat-card" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);">
+                    <div>PDFs Generated</div>
+                    <div class="stat-number">{summary.get('total_pdfs_generated', 0):,}</div>
+                </div>
+                <div class="stat-card" style="background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);">
+                    <div>Active Districts</div>
+                    <div class="stat-number">{summary.get('unique_districts_active', 0)}</div>
+                </div>
+            </div>
+            
+            <h2>🏥 District-Level Engagement</h2>
+            <table>
+                <tr>
+                    <th>District</th>
+                    <th>Page Views</th>
+                    <th>Calculations</th>
+                    <th>PDFs Generated</th>
+                    <th>Est. Claim Value (PKR)</th>
+                </tr>
+    """
+    
+    # Sort districts by activity
+    districts = summary.get('district_breakdown', {})
+    sorted_districts = sorted(districts.items(), key=lambda x: x[1].get('views', 0), reverse=True)
+    
+    for district, stats in sorted_districts:
+        if district != 'unknown':
+            html += f"""
+                <tr>
+                    <td><strong>{district}</strong></td>
+                    <td>{stats.get('views', 0):,}</td>
+                    <td>{stats.get('calculations', 0):,}</td>
+                    <td>{stats.get('pdfs', 0):,}</td>
+                    <td>PKR {stats.get('total_amount', 0):,}</td>
+                </tr>
+            """
+    
+    html += f"""
+            </table>
+            
+            <h2>📈 Monthly Trends</h2>
+            <table>
+                <tr>
+                    <th>Month</th>
+                    <th>Total Interactions</th>
+                    <th>Total Claim Value</th>
+                    <th>Top Districts</th>
+                </tr>
+    """
+    
+    monthly = summary.get('monthly_trends', {})
+    for month in sorted(monthly.keys(), reverse=True)[:6]:  # Last 6 months
+        data = monthly[month]
+        top_districts = sorted(data.get('districts', {}).items(), key=lambda x: x[1], reverse=True)[:3]
+        top_dist_str = ', '.join([f"{d} ({c})" for d, c in top_districts])
+        
+        html += f"""
+            <tr>
+                <td>{month}</td>
+                <td>{data.get('count', 0):,}</td>
+                <td>PKR {data.get('total_amount', 0):,}</td>
+                <td>{top_dist_str}</td>
+            </tr>
+        """
+    
+    html += f"""
+            </table>
+            
+            <div class="footer">
+                <p><strong>Platform Health:</strong> 🟢 Active | 
+                <strong>Target Audience:</strong> 3,000+ Health Managers across 36 districts of Punjab |
+                <strong>Contact for Advertising:</strong> smartbiopk@gmail.com</p>
+                <p style="font-size: 0.8em; color: #999;">
+                    Last updated: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')} | 
+                    Data is anonymized and privacy-compliant
+                </p>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    
+    return html
 
-@app.route('/download-log')
-def download_log():
-    year = request.args.get('year', datetime.utcnow().year, type=int)
-    month = request.args.get('month', datetime.utcnow().month, type=int)
-    year_month = f"{year}-{month:02d}"
-    file_path = os.path.join(LOG_DIR, f"{year_month}.txt")
-    if not os.path.exists(file_path):
-        return "No data for selected month.", 404
-    return send_file(file_path, as_attachment=True,
-                    download_name=f"MNHC-Claims-{year_month}.txt")
+@app.route('/analytics/json')
+def analytics_json():
+    """API endpoint for raw analytics data"""
+    return jsonify(_get_analytics_summary())
 
 # ---------- PDF GENERATION ----------
 @app.route('/generate_pdf', methods=['POST'])
 def generate_pdf():
     try:
         data = request.form
+        district = data.get('district', 'unknown')
+        
         signature_data = data.get('signature', '')
         sig_image = None
         if signature_data and ',' in signature_data:
@@ -179,7 +408,8 @@ def generate_pdf():
             ['', 'Total Claims/Expenses', '', '', f"{total:,}"]
         ]
 
-        table = Table(table_data, colWidths=[1.3*cm, 8.5*cm, 2.4*cm, 2.8*cm, 3.5*cm], rowHeights=[0.9*cm] + [0.75*cm]*12 + [0.9*cm])
+        table = Table(table_data, colWidths=[1.3*cm, 8.5*cm, 2.4*cm, 2.8*cm, 3.5*cm], 
+                     rowHeights=[0.9*cm] + [0.75*cm]*12 + [0.9*cm])
         table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2E7D32')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
@@ -202,7 +432,9 @@ def generate_pdf():
         elements.append(Spacer(1, 0.5*cm))
 
         # Declaration
-        decl_style = ParagraphStyle('Decl', parent=styles['Normal'], fontSize=12, leading=16, alignment=4, spaceBefore=10, spaceAfter=10)
+        decl_style = ParagraphStyle('Decl', parent=styles['Normal'], 
+                                   fontSize=12, leading=16, alignment=4, 
+                                   spaceBefore=10, spaceAfter=10)
         decl = """The above-mentioned claims/expenses are calculated as per contract, patient data entered in Electronic Medical Record (EMR), program guidelines and patients treated under my supervision. This bill is submitted for payment of claims/expenses (as per fixed rates under signed contract) to undersigned and official record.<br/><br/>
         Undersigned authorize competent authority to withhold/deduct amount from total claim, if any discrepancy/duplication found against patient visit entered in EMR."""
         elements.append(Paragraph(decl, decl_style))
@@ -215,7 +447,8 @@ def generate_pdf():
             ['IBAN Account Number:', data.get('iban', ''), '', ''],
             ['District:', data.get('district', ''), 'Signature & Stamp:', '']
         ]
-        info_table = Table(info_data, colWidths=[4.5*cm, 7*cm, 2.5*cm, 5*cm], rowHeights=[0.8*cm]*5)
+        info_table = Table(info_data, colWidths=[4.5*cm, 7*cm, 2.5*cm, 5*cm], 
+                          rowHeights=[0.8*cm]*5)
         info_table.setStyle(TableStyle([
             ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
             ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
@@ -241,14 +474,17 @@ def generate_pdf():
         # Build PDF
         doc.build(elements)
 
-        # ----------  LOG THIS CLAIM  (monthly analytics)  ----------
-        year_month = datetime.utcnow().strftime("%Y-%m")
-        _log_claim(data.get('district', 'unknown'), int(total))
+        # Log PDF generation analytics
+        _log_event('pdf_generation', {
+            'district': district,
+            'total': int(total),
+            'manager_name_hash': hashlib.sha256(data.get('manager_name', '').encode()).hexdigest()[:16]  # anonymized
+        })
 
         # Return PDF
         pdf_buffer.seek(0)
         return send_file(pdf_buffer, as_attachment=True,
-                        download_name=f"MNHC_Claim_{data.get('manager_name', 'User')}.pdf")
+                        download_name=f"MNHC_Claim_{data.get('manager_name', 'User')}_{datetime.utcnow().strftime('%Y%m%d')}.pdf")
 
     except Exception as e:
         return str(e), 500
