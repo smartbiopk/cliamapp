@@ -14,6 +14,24 @@ import json
 
 app = Flask(__name__)
 
+# ---------- UPSTASH KV CONFIGURATION ----------
+# Get environment variables from Vercel/Upstash integration
+UPSTASH_REDIS_REST_URL = os.environ.get('KV_REST_API_URL')
+UPSTASH_REDIS_REST_TOKEN = os.environ.get('KV_REST_API_TOKEN')
+
+# Import Upstash Redis client
+try:
+    from upstash_redis import Redis
+    redis_client = None
+    if UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN:
+        redis_client = Redis(url=UPSTASH_REDIS_REST_URL, token=UPSTASH_REDIS_REST_TOKEN)
+        print("✓ Upstash KV connected successfully")
+    else:
+        print("✗ Upstash KV credentials not found, using fallback")
+except ImportError:
+    redis_client = None
+    print("✗ upstash_redis not installed, using fallback storage")
+
 # ---------- CAPPING & RATES ----------
 CAPS = {
     'opd': 1100, 'anc': 200, 'pnc': 50, 'del': 30, 'tb': 30,
@@ -31,33 +49,45 @@ ADS_DB = {
     'default': {'text': 'Advertise Here - Reach 3000+ Health Managers smartbiopk@gmail.com', 'link': '/advertise'}
 }
 
-# ---------- ANALYTICS STORAGE ----------
-# Use /tmp for Vercel serverless (only writable directory)
-# For persistent storage, we'll use a JSON file in /tmp (resets on cold start but works for single session)
-# For production, you should use Vercel KV or a database
-ANALYTICS_FILE = "/tmp/mnhc_analytics.json"
+# ---------- ANALYTICS STORAGE (UPSTASH KV) ----------
+ANALYTICS_KEY = "mnhc_analytics_v2"
 
-def _init_analytics():
-    """Initialize analytics file if it doesn't exist"""
-    if not os.path.exists(ANALYTICS_FILE):
-        with open(ANALYTICS_FILE, 'w') as f:
-            json.dump({
-                'page_views': [],
-                'calculations': [],
-                'pdf_generations': [],
-                'district_stats': {},
-                'monthly_claims': {}
-            }, f)
+def _get_analytics_data():
+    """Get analytics data from Upstash KV or fallback to empty structure"""
+    if redis_client:
+        try:
+            data = redis_client.get(ANALYTICS_KEY)
+            if data:
+                return json.loads(data)
+        except Exception as e:
+            print(f"KV read error: {e}")
+    
+    # Fallback structure
+    return {
+        'page_views': [],
+        'calculations': [],
+        'pdf_generations': [],
+        'district_stats': {},
+        'monthly_claims': {}
+    }
 
-def _log_event(event_type, data):
-    """Log an analytics event"""
+def _save_analytics_data(data):
+    """Save analytics data to Upstash KV"""
+    if redis_client:
+        try:
+            redis_client.set(ANALYTICS_KEY, json.dumps(data))
+            return True
+        except Exception as e:
+            print(f"KV write error: {e}")
+    return False
+
+def _log_event(event_type, event_data):
+    """Log an analytics event to Upstash KV"""
     try:
-        _init_analytics()
-        with open(ANALYTICS_FILE, 'r') as f:
-            analytics = json.load(f)
+        analytics = _get_analytics_data()
         
         timestamp = datetime.utcnow().isoformat()
-        event_data = {
+        full_event = {
             'timestamp': timestamp,
             'date': datetime.utcnow().strftime('%Y-%m-%d'),
             'time': datetime.utcnow().strftime('%H:%M:%S'),
@@ -65,17 +95,21 @@ def _log_event(event_type, data):
             'year': datetime.utcnow().year,
             'type': event_type
         }
-        event_data.update(data)
+        full_event.update(event_data)
         
+        # Add to event lists (keep last 1000 events per type to prevent bloat)
         if event_type == 'page_view':
-            analytics['page_views'].append(event_data)
+            analytics['page_views'].append(full_event)
+            analytics['page_views'] = analytics['page_views'][-1000:]  # Keep last 1000
         elif event_type == 'calculation':
-            analytics['calculations'].append(event_data)
+            analytics['calculations'].append(full_event)
+            analytics['calculations'] = analytics['calculations'][-1000:]
         elif event_type == 'pdf_generation':
-            analytics['pdf_generations'].append(event_data)
+            analytics['pdf_generations'].append(full_event)
+            analytics['pdf_generations'] = analytics['pdf_generations'][-1000:]
         
         # Update district stats
-        district = data.get('district', 'unknown')
+        district = event_data.get('district', 'unknown')
         if district not in analytics['district_stats']:
             analytics['district_stats'][district] = {'views': 0, 'calculations': 0, 'pdfs': 0, 'total_amount': 0}
         
@@ -83,7 +117,7 @@ def _log_event(event_type, data):
             analytics['district_stats'][district]['views'] += 1
         elif event_type == 'calculation':
             analytics['district_stats'][district]['calculations'] += 1
-            analytics['district_stats'][district]['total_amount'] += data.get('total', 0)
+            analytics['district_stats'][district]['total_amount'] += event_data.get('total', 0)
         elif event_type == 'pdf_generation':
             analytics['district_stats'][district]['pdfs'] += 1
         
@@ -94,23 +128,21 @@ def _log_event(event_type, data):
         
         if event_type in ['calculation', 'pdf_generation']:
             analytics['monthly_claims'][month_key]['count'] += 1
-            analytics['monthly_claims'][month_key]['total_amount'] += data.get('total', 0)
+            analytics['monthly_claims'][month_key]['total_amount'] += event_data.get('total', 0)
             if district not in analytics['monthly_claims'][month_key]['districts']:
                 analytics['monthly_claims'][month_key]['districts'][district] = 0
             analytics['monthly_claims'][month_key]['districts'][district] += 1
         
-        with open(ANALYTICS_FILE, 'w') as f:
-            json.dump(analytics, f, indent=2)
-            
+        # Save to KV
+        _save_analytics_data(analytics)
+        
     except Exception as e:
-        print(f"Analytics error: {e}")
+        print(f"Analytics logging error: {e}")
 
 def _get_analytics_summary():
     """Get summary for pharma presentation"""
     try:
-        _init_analytics()
-        with open(ANALYTICS_FILE, 'r') as f:
-            analytics = json.load(f)
+        analytics = _get_analytics_data()
         
         total_views = len(analytics['page_views'])
         total_calcs = len(analytics['calculations'])
@@ -119,23 +151,32 @@ def _get_analytics_summary():
         
         # Calculate active users (last 30 days)
         recent_cutoff = datetime.utcnow().timestamp() - (30 * 24 * 60 * 60)
-        active_users = len(set([
-            pv.get('district', 'unknown') 
-            for pv in analytics['page_views'] 
-            if datetime.fromisoformat(pv['timestamp']).timestamp() > recent_cutoff
-        ]))
+        active_districts = set()
+        
+        for pv in analytics['page_views']:
+            try:
+                if datetime.fromisoformat(pv['timestamp']).timestamp() > recent_cutoff:
+                    active_districts.add(pv.get('district', 'unknown'))
+            except:
+                pass
+        
+        # Calculate total platform value
+        total_value = sum(d.get('total_amount', 0) for d in analytics['district_stats'].values())
         
         return {
             'total_page_views': total_views,
             'total_calculations': total_calcs,
             'total_pdfs_generated': total_pdfs,
             'unique_districts_active': unique_districts,
-            'monthly_active_districts': active_users,
+            'monthly_active_districts': len(active_districts),
+            'total_platform_value': total_value,
             'district_breakdown': analytics['district_stats'],
-            'monthly_trends': analytics['monthly_claims']
+            'monthly_trends': analytics['monthly_claims'],
+            'last_updated': datetime.utcnow().isoformat(),
+            'storage_type': 'Upstash KV' if redis_client else 'Fallback (Memory)'
         }
     except Exception as e:
-        return {'error': str(e)}
+        return {'error': str(e), 'storage_type': 'Error'}
 
 # ---------- HELPERS ----------
 def format_date_ddmmyyyy(date_str):
@@ -155,7 +196,7 @@ def index():
     # Log page view analytics (privacy-safe)
     _log_event('page_view', {
         'district': district,
-        'ip_hash': hashlib.sha256(request.remote_addr.encode()).hexdigest()[:16],  # anonymized
+        'ip_hash': hashlib.sha256(request.remote_addr.encode()).hexdigest()[:16],
         'user_agent': request.user_agent.string[:50] if request.user_agent else 'unknown'
     })
     
@@ -169,7 +210,6 @@ def index():
         'Sialkot', 'Toba Tek Singh', 'Vehari'
     ]
     
-    # Build month/year lists
     now = datetime.utcnow()
     years = list(range(2020, now.year + 2))
     months = list(range(1, 13))
@@ -217,61 +257,207 @@ def analytics_dashboard():
     """Public analytics dashboard for pharma companies"""
     summary = _get_analytics_summary()
     
-    # Create a nice HTML dashboard
     html = f"""
     <!DOCTYPE html>
     <html>
     <head>
-        <title>MNHC Platform Analytics</title>
+        <title>MNHC Platform Analytics | SmartBio Solutions</title>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <style>
-            body {{ font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }}
-            .container {{ max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
-            h1 {{ color: #2E7D32; border-bottom: 3px solid #2E7D32; padding-bottom: 10px; }}
-            .stats-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin: 30px 0; }}
-            .stat-card {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 8px; text-align: center; }}
-            .stat-number {{ font-size: 2.5em; font-weight: bold; margin: 10px 0; }}
-            table {{ width: 100%; border-collapse: collapse; margin: 20px 0; }}
-            th, td {{ padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }}
-            th {{ background: #2E7D32; color: white; }}
+            :root {{
+                --primary: #2E7D32;
+                --primary-dark: #1B5E20;
+                --accent: #1976D2;
+                --bg: #f5f7fa;
+                --card: #ffffff;
+                --text: #2c3e50;
+                --text-light: #607d8b;
+            }}
+            * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+            body {{ 
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                background: var(--bg);
+                color: var(--text);
+                line-height: 1.6;
+            }}
+            .container {{ max-width: 1200px; margin: 0 auto; padding: 40px 20px; }}
+            header {{ 
+                background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+                color: white;
+                padding: 40px 20px;
+                text-align: center;
+                margin-bottom: 40px;
+            }}
+            header h1 {{ font-size: 2.5rem; margin-bottom: 10px; }}
+            header p {{ opacity: 0.9; font-size: 1.1rem; }}
+            .stats-grid {{ 
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+                gap: 24px;
+                margin-bottom: 40px;
+            }}
+            .stat-card {{
+                background: var(--card);
+                padding: 30px;
+                border-radius: 16px;
+                box-shadow: 0 4px 6px rgba(0,0,0,0.07);
+                text-align: center;
+                transition: transform 0.2s;
+            }}
+            .stat-card:hover {{ transform: translateY(-4px); }}
+            .stat-icon {{
+                width: 60px;
+                height: 60px;
+                border-radius: 50%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                margin: 0 auto 16px;
+                font-size: 28px;
+            }}
+            .stat-card:nth-child(1) .stat-icon {{ background: #e3f2fd; color: #1976d2; }}
+            .stat-card:nth-child(2) .stat-icon {{ background: #fce4ec; color: #c2185b; }}
+            .stat-card:nth-child(3) .stat-icon {{ background: #e8f5e9; color: #388e3c; }}
+            .stat-card:nth-child(4) .stat-icon {{ background: #fff3e0; color: #f57c00; }}
+            .stat-card:nth-child(5) .stat-icon {{ background: #f3e5f5; color: #7b1fa2; }}
+            .stat-number {{ font-size: 2.5rem; font-weight: 700; color: var(--text); margin-bottom: 8px; }}
+            .stat-label {{ color: var(--text-light); font-size: 0.95rem; text-transform: uppercase; letter-spacing: 0.5px; }}
+            .section {{
+                background: var(--card);
+                padding: 30px;
+                border-radius: 16px;
+                box-shadow: 0 4px 6px rgba(0,0,0,0.07);
+                margin-bottom: 30px;
+            }}
+            .section h2 {{
+                font-size: 1.5rem;
+                margin-bottom: 24px;
+                padding-bottom: 12px;
+                border-bottom: 2px solid var(--bg);
+                display: flex;
+                align-items: center;
+                gap: 12px;
+            }}
+            table {{
+                width: 100%;
+                border-collapse: collapse;
+                margin-top: 20px;
+            }}
+            th, td {{
+                padding: 16px;
+                text-align: left;
+                border-bottom: 1px solid #e0e0e0;
+            }}
+            th {{
+                background: var(--primary);
+                color: white;
+                font-weight: 600;
+                text-transform: uppercase;
+                font-size: 0.85rem;
+                letter-spacing: 0.5px;
+            }}
             tr:hover {{ background: #f5f5f5; }}
-            .footer {{ margin-top: 40px; padding-top: 20px; border-top: 1px solid #ddd; color: #666; font-size: 0.9em; }}
+            .badge {{
+                display: inline-block;
+                padding: 4px 12px;
+                border-radius: 20px;
+                font-size: 0.85rem;
+                font-weight: 600;
+            }}
+            .badge-success {{ background: #e8f5e9; color: #2e7d32; }}
+            .badge-info {{ background: #e3f2fd; color: #1976d2; }}
+            .footer {{
+                text-align: center;
+                padding: 40px;
+                color: var(--text-light);
+                border-top: 1px solid #e0e0e0;
+                margin-top: 40px;
+            }}
+            .cta-box {{
+                background: linear-gradient(135deg, var(--accent) 0%, #0d47a1 100%);
+                color: white;
+                padding: 40px;
+                border-radius: 16px;
+                text-align: center;
+                margin-top: 40px;
+            }}
+            .cta-box h3 {{ font-size: 1.75rem; margin-bottom: 16px; }}
+            .cta-box a {{
+                display: inline-block;
+                background: white;
+                color: var(--accent);
+                padding: 12px 32px;
+                border-radius: 30px;
+                text-decoration: none;
+                font-weight: 600;
+                margin-top: 16px;
+            }}
+            .status-badge {{
+                display: inline-block;
+                padding: 4px 12px;
+                border-radius: 20px;
+                font-size: 0.75rem;
+                background: {'#e8f5e9' if 'Upstash' in summary.get('storage_type', '') else '#fff3e0'};
+                color: {'#2e7d32' if 'Upstash' in summary.get('storage_type', '') else '#f57c00'};
+                margin-left: 12px;
+            }}
+            @media (max-width: 768px) {{
+                .stats-grid {{ grid-template-columns: 1fr; }}
+                header h1 {{ font-size: 1.75rem; }}
+            }}
         </style>
     </head>
     <body>
+        <header>
+            <h1>📊 MNHC Health Platform Analytics</h1>
+            <p>Real-time engagement metrics for pharmaceutical advertising partners</p>
+        </header>
+        
         <div class="container">
-            <h1>📊 MNHC Health Platform - Usage Analytics</h1>
-            <p style="color: #666; font-size: 1.1em;">
-                Real-time platform engagement metrics for pharmaceutical advertising partners
-            </p>
+            <div style="text-align: center; margin-bottom: 30px; color: var(--text-light);">
+                Storage: <span class="status-badge">{summary.get('storage_type', 'Unknown')}</span>
+                | Last Updated: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}
+            </div>
             
             <div class="stats-grid">
                 <div class="stat-card">
-                    <div>Total Page Views</div>
+                    <div class="stat-icon">👁️</div>
                     <div class="stat-number">{summary.get('total_page_views', 0):,}</div>
+                    <div class="stat-label">Total Page Views</div>
                 </div>
-                <div class="stat-card" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);">
-                    <div>Claims Calculated</div>
+                <div class="stat-card">
+                    <div class="stat-icon">🧮</div>
                     <div class="stat-number">{summary.get('total_calculations', 0):,}</div>
+                    <div class="stat-label">Claims Calculated</div>
                 </div>
-                <div class="stat-card" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);">
-                    <div>PDFs Generated</div>
+                <div class="stat-card">
+                    <div class="stat-icon">📄</div>
                     <div class="stat-number">{summary.get('total_pdfs_generated', 0):,}</div>
+                    <div class="stat-label">PDFs Generated</div>
                 </div>
-                <div class="stat-card" style="background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);">
-                    <div>Active Districts</div>
+                <div class="stat-card">
+                    <div class="stat-icon">🏥</div>
                     <div class="stat-number">{summary.get('unique_districts_active', 0)}</div>
+                    <div class="stat-label">Active Districts</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">💰</div>
+                    <div class="stat-number">PKR {summary.get('total_platform_value', 0):,}</div>
+                    <div class="stat-label">Total Claim Value</div>
                 </div>
             </div>
             
-            <h2>🏥 District-Level Engagement</h2>
-            <table>
-                <tr>
-                    <th>District</th>
-                    <th>Page Views</th>
-                    <th>Calculations</th>
-                    <th>PDFs Generated</th>
-                    <th>Est. Claim Value (PKR)</th>
-                </tr>
+            <div class="section">
+                <h2>🏥 District-Level Engagement</h2>
+                <table>
+                    <tr>
+                        <th>District</th>
+                        <th style="text-align: center;">Page Views</th>
+                        <th style="text-align: center;">Calculations</th>
+                        <th style="text-align: center;">PDFs Generated</th>
+                        <th style="text-align: right;">Est. Claim Value (PKR)</th>
+                    </tr>
     """
     
     # Sort districts by activity
@@ -283,51 +469,58 @@ def analytics_dashboard():
             html += f"""
                 <tr>
                     <td><strong>{district}</strong></td>
-                    <td>{stats.get('views', 0):,}</td>
-                    <td>{stats.get('calculations', 0):,}</td>
-                    <td>{stats.get('pdfs', 0):,}</td>
-                    <td>PKR {stats.get('total_amount', 0):,}</td>
+                    <td style="text-align: center;">{stats.get('views', 0):,}</td>
+                    <td style="text-align: center;">{stats.get('calculations', 0):,}</td>
+                    <td style="text-align: center;">{stats.get('pdfs', 0):,}</td>
+                    <td style="text-align: right;"><strong>PKR {stats.get('total_amount', 0):,}</strong></td>
                 </tr>
             """
     
     html += f"""
-            </table>
+                </table>
+            </div>
             
-            <h2>📈 Monthly Trends</h2>
-            <table>
-                <tr>
-                    <th>Month</th>
-                    <th>Total Interactions</th>
-                    <th>Total Claim Value</th>
-                    <th>Top Districts</th>
-                </tr>
+            <div class="section">
+                <h2>📈 Monthly Trends</h2>
+                <table>
+                    <tr>
+                        <th>Month</th>
+                        <th style="text-align: center;">Total Interactions</th>
+                        <th style="text-align: right;">Total Claim Value</th>
+                        <th>Top Districts</th>
+                    </tr>
     """
     
     monthly = summary.get('monthly_trends', {})
-    for month in sorted(monthly.keys(), reverse=True)[:6]:  # Last 6 months
+    for month in sorted(monthly.keys(), reverse=True)[:6]:
         data = monthly[month]
         top_districts = sorted(data.get('districts', {}).items(), key=lambda x: x[1], reverse=True)[:3]
         top_dist_str = ', '.join([f"{d} ({c})" for d, c in top_districts])
         
         html += f"""
             <tr>
-                <td>{month}</td>
-                <td>{data.get('count', 0):,}</td>
-                <td>PKR {data.get('total_amount', 0):,}</td>
+                <td><span class="badge badge-info">{month}</span></td>
+                <td style="text-align: center;">{data.get('count', 0):,}</td>
+                <td style="text-align: right;"><strong>PKR {data.get('total_amount', 0):,}</strong></td>
                 <td>{top_dist_str}</td>
             </tr>
         """
     
-    html += f"""
-            </table>
+    html += """
+                </table>
+            </div>
+            
+            <div class="cta-box">
+                <h3>🎯 Advertise on MNHC Platform</h3>
+                <p>Reach 3,000+ Health Managers across 36 districts of Punjab</p>
+                <p style="margin-top: 10px; opacity: 0.9;">Premium ad placement available on calculator pages</p>
+                <a href="mailto:smartbiopk@gmail.com?subject=MNHC Advertising Inquiry">Contact Us</a>
+            </div>
             
             <div class="footer">
-                <p><strong>Platform Health:</strong> 🟢 Active | 
-                <strong>Target Audience:</strong> 3,000+ Health Managers across 36 districts of Punjab |
-                <strong>Contact for Advertising:</strong> smartbiopk@gmail.com</p>
-                <p style="font-size: 0.8em; color: #999;">
-                    Last updated: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')} | 
-                    Data is anonymized and privacy-compliant
+                <p><strong>MNHC Claim Portal</strong> | Powered by SmartBio Solutions</p>
+                <p style="margin-top: 8px; font-size: 0.9rem;">
+                    Privacy-compliant analytics | No personal health data collected
                 </p>
             </div>
         </div>
@@ -341,6 +534,22 @@ def analytics_dashboard():
 def analytics_json():
     """API endpoint for raw analytics data"""
     return jsonify(_get_analytics_summary())
+
+@app.route('/analytics/reset', methods=['POST'])
+def reset_analytics():
+    """Reset analytics data (protected - for admin use)"""
+    # Simple protection - you should add proper auth in production
+    secret = request.headers.get('X-Admin-Secret')
+    if secret != os.environ.get('ADMIN_SECRET', 'your-secret-key'):
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    if redis_client:
+        try:
+            redis_client.delete(ANALYTICS_KEY)
+            return jsonify({'message': 'Analytics reset successful'})
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+    return jsonify({'error': 'KV not available'}), 500
 
 # ---------- PDF GENERATION ----------
 @app.route('/generate_pdf', methods=['POST'])
@@ -478,7 +687,7 @@ def generate_pdf():
         _log_event('pdf_generation', {
             'district': district,
             'total': int(total),
-            'manager_name_hash': hashlib.sha256(data.get('manager_name', '').encode()).hexdigest()[:16]  # anonymized
+            'manager_name_hash': hashlib.sha256(data.get('manager_name', '').encode()).hexdigest()[:16]
         })
 
         # Return PDF
@@ -487,7 +696,10 @@ def generate_pdf():
                         download_name=f"MNHC_Claim_{data.get('manager_name', 'User')}_{datetime.utcnow().strftime('%Y%m%d')}.pdf")
 
     except Exception as e:
-        return str(e), 500
+        import traceback
+        print(f"PDF Generation Error: {str(e)}")
+        print(traceback.format_exc())
+        return jsonify({'error': str(e)}), 500
 
 # ---------- RUN ----------
 if __name__ == '__main__':
