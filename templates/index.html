@@ -1,269 +1,645 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MNHC Claim Calculator</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-</head>
-<body>
-    <!-- Pharma Ad Banner (Top) -->
-    <div class="ad-banner top-ad">
-        <div class="ad-content">
-            <strong>🧪 Sponsored:</strong> {{ ad.text }}
-            <a href="{{ ad.link }}" class="ad-btn">Learn More</a>
-        </div>
-    </div>
+/* Root Variables */
+:root {
+    --primary: #2E7D32;
+    --primary-dark: #1B5E20;
+    --primary-light: #4CAF50;
+    --accent: #1976D2;
+    --danger: #D32F2F;
+    --warning: #F57C00;
+    --success: #388E3C;
+    --bg: #f5f7fa;
+    --card-bg: #ffffff;
+    --text: #2c3e50;
+    --text-light: #607d8b;
+    --border: #e0e6ed;
+    --shadow: 0 2px 8px rgba(0,0,0,0.08);
+    --shadow-hover: 0 4px 16px rgba(0,0,0,0.12);
+    --radius: 12px;
+    --radius-sm: 8px;
+}
 
-    <div class="container">
-        <header>
-            <h1>Claim/Expenses Payment Form</h1>
-            <h2>Maryam Nawaz Health Clinic</h2>
-        </header>
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
 
-        <!-- District Selector (For Ad Targeting) -->
-        <div class="district-bar">
-            <label>Select District for Localized Offers:</label>
-            <select id="district-select" onchange="changeDistrict()">
-                {% for d in districts %}
-                <option value="{{ d }}" {% if d == selected_district %}selected{% endif %}>{{ d }}</option>
-                {% endfor %}
-            </select>
-        </div>
+body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+}
 
-        <form id="claimForm" method="POST" action="/generate_pdf">
-            <!-- Hidden district field -->
-            <input type="hidden" name="district" id="district-hidden" value="{{ selected_district }}">
+/* App Container */
+.app-container {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
 
-            <!-- Certification Section -->
-            <div class="cert-section">
-                <p>It is certified that the following healthcare services have been provided at Mariam Nawaz Health Clinic
-                <input type="text" name="clinic_name" placeholder="Clinic Name" required>
-                under the supervision of the undersigned Health Manager during the period
-                <input type="date" name="period_start" required> to
-                <input type="date" name="period_end" required>.</p>
-            </div>
+/* Header */
+.main-header {
+    background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+    color: white;
+    padding: 1rem 2rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+}
 
-            <!-- Calculator Table -->
-            <div class="table-container">
-                <table id="claimTable">
-                    <thead>
-                        <tr>
-                            <th>Sr.#</th>
-                            <th>Services/Visit Type</th>
-                            <th>No. of Patients</th>
-                            <th>Unit Cost</th>
-                            <th>Total Cost (PKR)</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td>1</td>
-                            <td>OPD (Medicines Dispensed) <span class="cap">Max: 1100</span></td>
-                            <td><input type="number" name="opd" class="calc-input" data-rate="400" data-cap="1100" min="0"></td>
-                            <td>400</td>
-                            <td class="amount" id="amt-opd">0</td>
-                        </tr>
-                        <tr>
-                            <td>2</td>
-                            <td>Antenatal Care (ANC) <span class="cap">Max: 200</span></td>
-                            <td><input type="number" name="anc" class="calc-input" data-rate="600" data-cap="200" min="0"></td>
-                            <td>600</td>
-                            <td class="amount" id="amt-anc">0</td>
-                        </tr>
-                        <tr>
-                            <td>3</td>
-                            <td>Postnatal Care (PNC) <span class="cap">Max: 50</span></td>
-                            <td><input type="number" name="pnc" class="calc-input" data-rate="200" data-cap="50" min="0"></td>
-                            <td>200</td>
-                            <td class="amount" id="amt-pnc">0</td>
-                        </tr>
-                        <tr>
-                            <td>4</td>
-                            <td>Normal Deliveries <span class="cap">Max: 30</span></td>
-                            <td><input type="number" name="del" class="calc-input" data-rate="6500" data-cap="30" min="0"></td>
-                            <td>6,500</td>
-                            <td class="amount" id="amt-del">0</td>
-                        </tr>
-                        <tr>
-                            <td>5</td>
-                            <td>TB Patients Checked <span class="cap">Max: 30</span></td>
-                            <td><input type="number" name="tb" class="calc-input" data-rate="200" data-cap="30" min="0"></td>
-                            <td>200</td>
-                            <td class="amount" id="amt-tb">0</td>
-                        </tr>
-                        <tr>
-                            <td>6</td>
-                            <td>EPI Vaccination <span class="cap">Max: 200</span></td>
-                            <td><input type="number" name="epi" class="calc-input" data-rate="100" data-cap="200" min="0"></td>
-                            <td>100</td>
-                            <td class="amount" id="amt-epi">0</td>
-                        </tr>
-                        <tr>
-                            <td>7</td>
-                            <td>Treatment & Nutrition <span class="cap">Max: 250</span></td>
-                            <td><input type="number" name="nut" class="calc-input" data-rate="200" data-cap="250" min="0"></td>
-                            <td>200</td>
-                            <td class="amount" id="amt-nut">0</td>
-                        </tr>
-                        <tr>
-                            <td>8</td>
-                            <td>Post-Partum FP <span class="cap">Max: 20</span></td>
-                            <td><input type="number" name="ppfp" class="calc-input" data-rate="300" data-cap="20" min="0"></td>
-                            <td>300</td>
-                            <td class="amount" id="amt-ppfp">0</td>
-                        </tr>
-                        <tr class="section-header">
-                            <td>9</td>
-                            <td colspan="4"><strong>Family Planning Services</strong></td>
-                        </tr>
-                        <tr>
-                            <td></td>
-                            <td class="indent">Short-Acting Methods <span class="cap">Max: 60</span></td>
-                            <td><input type="number" name="short" class="calc-input" data-rate="150" data-cap="60" min="0"></td>
-                            <td>150</td>
-                            <td class="amount" id="amt-short">0</td>
-                        </tr>
-                        <tr>
-                            <td></td>
-                            <td class="indent">Long-Acting Methods <span class="cap">Max: 30</span></td>
-                            <td><input type="number" name="long" class="calc-input" data-rate="400" data-cap="30" min="0"></td>
-                            <td>400</td>
-                            <td class="amount" id="amt-long">0</td>
-                        </tr>
-                        <tr>
-                            <td>10</td>
-                            <td>Repair & Maintenance</td>
-                            <td>-</td>
-                            <td>-</td>
-                            <td>25,000</td>
-                        </tr>
-                        <tr class="total-row">
-                            <td colspan="4"><strong>Total Claims/Expenses</strong></td>
-                            <td><strong id="grand-total">25,000</strong></td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
+.logo-section {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
 
-            <!-- Declaration -->
-            <div class="declaration">
-                <p>The above-mentioned claims/expenses are calculated as per contract, patient data entered in Electronic Medical Record (EMR), program guidelines and patients treated under my supervision. This bill is submitted for payment of claims/expenses (as per fixed rates under signed contract) to undersigned and official record.</p>
-                <p>Undersigned authorize competent authority to withhold/deduct amount from total claim, if any discrepancy/duplication found against patient visit entered in EMR.</p>
-            </div>
+.logo-icon {
+    font-size: 2.5rem;
+    opacity: 0.9;
+}
 
-            <!-- Bottom Inputs -->
-            <div class="form-grid">
-                <div class="form-group">
-                    <label>Health Manager Name:</label>
-                    <input type="text" name="manager_name" required>
-                </div>
-                <div class="form-group">
-                    <label>CNIC:</label>
-                    <input type="text" name="cnic" pattern="[0-9]{13}" placeholder="13 digits without dashes">
-                </div>
-                <div class="form-group">
-                    <label>Account Title:</label>
-                    <input type="text" name="account_title" required>
-                </div>
-                <div class="form-group">
-                    <label>Account Number (IBAN):</label>
-                    <input type="text" name="iban" required>
-                </div>
-                <div class="form-group">
-                    <label>MNHC Name:</label>
-                    <input type="text" name="mnhc_name" required>
-                </div>
-                <div class="form-group">
-                    <label>Date:</label>
-                    <input type="date" name="date" required>
-                </div>
-            </div>
+.logo-text h1 {
+    font-size: 1.5rem;
+    font-weight: 700;
+    margin-bottom: 0.25rem;
+}
 
-            <!-- Signature Section -->
-            <div class="signature-section">
-                <label>Digital Signature:</label>
-                <div class="signature-box">
-                    <canvas id="sigCanvas" width="350" height="90"></canvas>
-                    <button type="button" class="clear-btn" onclick="clearSignature()">Clear Box</button>
-                </div>
-                <input type="hidden" name="signature" id="signatureData">
-            </div>
+.logo-text span {
+    font-size: 0.875rem;
+    opacity: 0.9;
+    font-weight: 400;
+}
 
-            <!-- Privacy Disclaimer -->
-            <div class="disclaimer-box">
-                <small>
-                    🔒 <strong>Privacy Note:</strong> No personal patient data is stored on our servers. 
-                    All information remains on your device and is included only in the PDF you download.
-                </small>
-            </div>
+/* Ad Banner */
+.ad-banner {
+    background: linear-gradient(90deg, #f8f9fa 0%, #e9ecef 100%);
+    border-bottom: 1px solid var(--border);
+    padding: 0.75rem 2rem;
+    text-align: center;
+}
 
-            <!-- Pharma Ad (Bottom - Before Submit) -->
-            <div class="ad-banner bottom-ad">
-                <div class="ad-content">
-                    <strong>💊 Local Pharma Special:</strong> Order medicines in bulk for your clinic.
-                    <a href="#" class="ad-btn">View Catalog</a>
-                </div>
-            </div>
+.ad-content {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.75rem;
+}
 
-            <button type="submit" class="submit-btn">Generate PDF Claim</button>
-        </form>
-    </div>
+.ad-label {
+    background: var(--accent);
+    color: white;
+    font-size: 0.65rem;
+    font-weight: 700;
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
 
-    <!-- Admin quick-link (tiny, bottom-center) -->
-    <div style="text-align:center; margin-top:30px; font-size:11px;">
-        <a href="/admin" style="color:#999;">Admin</a>
-    </div>
+.ad-text {
+    color: var(--text);
+    text-decoration: none;
+    font-weight: 500;
+    font-size: 0.9rem;
+}
 
-    <script src="{{ url_for('static', filename='js/signature.js') }}"></script>
-    <script>
-        // Real-time Calculation Logic
-        document.querySelectorAll('.calc-input').forEach(input => {
-            input.addEventListener('input', calculateTotals);
-        });
+.ad-text:hover {
+    color: var(--accent);
+}
 
-        function calculateTotals() {
-            let grandTotal = 25000; // Maintenance
+/* Layout */
+.main-layout {
+    display: flex;
+    flex: 1;
+    max-width: 1400px;
+    margin: 0 auto;
+    width: 100%;
+    padding: 2rem;
+    gap: 2rem;
+}
 
-            document.querySelectorAll('.calc-input').forEach(input => {
-                const rate = parseInt(input.dataset.rate);
-                const cap = parseInt(input.dataset.cap);
-                const val = parseInt(input.value) || 0;
-                const actual = Math.min(val, cap);
-                const amount = actual * rate;
+/* Sidebar */
+.sidebar {
+    width: 280px;
+    flex-shrink: 0;
+}
 
-                // Display amount
-                const key = input.name;
-                const amtCell = document.getElementById('amt-' + key);
-                amtCell.textContent = amount.toLocaleString();
+.district-selector {
+    background: var(--card-bg);
+    padding: 1.5rem;
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    margin-bottom: 1.5rem;
+}
 
-                // Visual feedback: Red if capped
-                if (val > cap) {
-                    amtCell.classList.add('capped');
-                    amtCell.title = `Capped at ${cap} (entered: ${val})`;
-                } else {
-                    amtCell.classList.remove('capped');
-                    amtCell.title = '';
-                }
+.district-selector label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-weight: 600;
+    margin-bottom: 0.75rem;
+    color: var(--text);
+}
 
-                grandTotal += amount;
-            });
+.district-selector i {
+    color: var(--primary);
+}
 
-            document.getElementById('grand-total').textContent = grandTotal.toLocaleString();
-        }
+.form-control {
+    width: 100%;
+    padding: 0.75rem 1rem;
+    border: 2px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-size: 0.95rem;
+    transition: all 0.2s;
+    font-family: inherit;
+}
 
-        function changeDistrict() {
-            const district = document.getElementById('district-select').value;
-            document.getElementById('district-hidden').value = district;
-            // Reload page with new district (for ad targeting)
-            window.location.href = '/?district=' + district;
-        }
+.form-control:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(46, 125, 50, 0.1);
+}
 
-        // Form submission - capture signature
-        document.getElementById('claimForm').addEventListener('submit', function(e) {
-            const canvas = document.getElementById('sigCanvas');
-            document.getElementById('signatureData').value = canvas.toDataURL();
-        });
-    </script>
-</body>
-</html>
+.quick-stats {
+    background: var(--card-bg);
+    padding: 1.5rem;
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    margin-bottom: 1.5rem;
+}
+
+.quick-stats h3 {
+    font-size: 1rem;
+    margin-bottom: 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: var(--text);
+}
+
+.stat-item {
+    display: flex;
+    justify-content: space-between;
+    padding: 0.75rem 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.9rem;
+}
+
+.stat-item:last-child {
+    border-bottom: none;
+    margin-top: 0.5rem;
+    padding-top: 1rem;
+    border-top: 2px solid var(--primary);
+}
+
+.stat-item.total {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--primary);
+}
+
+.help-section {
+    background: var(--card-bg);
+    padding: 1.5rem;
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+}
+
+.help-section h3 {
+    font-size: 1rem;
+    margin-bottom: 0.75rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.help-section p {
+    font-size: 0.9rem;
+    color: var(--text-light);
+    line-height: 1.5;
+}
+
+/* Main Content */
+.main-content {
+    flex: 1;
+    max-width: 900px;
+}
+
+.claim-form {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+}
+
+.form-section {
+    background: var(--card-bg);
+    padding: 2rem;
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+}
+
+.form-section h2 {
+    font-size: 1.25rem;
+    margin-bottom: 1.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    color: var(--text);
+    padding-bottom: 0.75rem;
+    border-bottom: 2px solid var(--border);
+}
+
+.form-section h2 i {
+    color: var(--primary);
+}
+
+.form-row {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+
+.form-group {
+    flex: 1;
+    min-width: 200px;
+}
+
+.form-group.large {
+    flex: 2;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-weight: 500;
+    font-size: 0.9rem;
+    color: var(--text);
+}
+
+/* Services Grid */
+.services-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+    gap: 1.25rem;
+}
+
+.service-card {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 1.25rem;
+    border: 2px solid var(--border);
+    border-radius: var(--radius-sm);
+    transition: all 0.2s;
+    background: #fafbfc;
+}
+
+.service-card:hover {
+    border-color: var(--primary-light);
+    box-shadow: var(--shadow-hover);
+    transform: translateY(-2px);
+}
+
+.service-card.wide {
+    grid-column: 1 / -1;
+    flex-wrap: wrap;
+}
+
+.service-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.25rem;
+    color: white;
+    flex-shrink: 0;
+}
+
+.service-icon.blue { background: linear-gradient(135deg, #42a5f5, #1976d2); }
+.service-icon.pink { background: linear-gradient(135deg, #f48fb1, #c2185b); }
+.service-icon.purple { background: linear-gradient(135deg, #ab47bc, #7b1fa2); }
+.service-icon.red { background: linear-gradient(135deg, #ef5350, #c62828); }
+.service-icon.orange { background: linear-gradient(135deg, #ffa726, #ef6c00); }
+.service-icon.green { background: linear-gradient(135deg, #66bb6a, #388e3c); }
+.service-icon.yellow { background: linear-gradient(135deg, #ffca28, #f57f17); color: #333; }
+.service-icon.teal { background: linear-gradient(135deg, #26a69a, #00695c); }
+.service-icon.indigo { background: linear-gradient(135deg, #5c6bc0, #283593); }
+
+.service-info {
+    flex: 1;
+}
+
+.service-info h3 {
+    font-size: 1rem;
+    margin-bottom: 0.25rem;
+    color: var(--text);
+}
+
+.service-desc {
+    font-size: 0.8rem;
+    color: var(--text-light);
+    margin-bottom: 0.5rem;
+}
+
+.rate-badge {
+    display: inline-block;
+    background: rgba(46, 125, 50, 0.1);
+    color: var(--primary);
+    padding: 0.25rem 0.75rem;
+    border-radius: 20px;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.service-input {
+    width: 120px;
+    text-align: center;
+}
+
+.service-input input {
+    text-align: center;
+    font-weight: 600;
+    font-size: 1.1rem;
+}
+
+.input-hint {
+    display: block;
+    font-size: 0.7rem;
+    color: var(--text-light);
+    margin-top: 0.25rem;
+}
+
+.calc-result {
+    margin-top: 0.5rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.calc-result .amount {
+    color: var(--success);
+}
+
+.calc-result .capped {
+    color: var(--warning);
+}
+
+.capped-input {
+    border-color: var(--warning) !important;
+    background: #fff3e0;
+}
+
+/* Family Planning Special Layout */
+.fp-inputs {
+    display: flex;
+    gap: 2rem;
+    margin-left: auto;
+}
+
+.fp-item {
+    text-align: center;
+}
+
+.fp-item label {
+    display: block;
+    font-size: 0.8rem;
+    margin-bottom: 0.5rem;
+    color: var(--text-light);
+}
+
+.fp-item input {
+    width: 100px;
+    margin-bottom: 0.5rem;
+}
+
+.rate-text {
+    font-size: 0.75rem;
+    color: var(--primary);
+    font-weight: 600;
+}
+
+/* Signature Section */
+.signature-container {
+    border: 2px dashed var(--border);
+    border-radius: var(--radius-sm);
+    padding: 1rem;
+    background: #fafbfc;
+}
+
+#signaturePad {
+    width: 100%;
+    height: 150px;
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    cursor: crosshair;
+    touch-action: none;
+}
+
+.signature-actions {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-top: 1rem;
+}
+
+.signature-hint {
+    color: var(--text-light);
+    font-size: 0.85rem;
+}
+
+/* Summary Section */
+.summary-section {
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    border: 2px solid var(--primary-light);
+}
+
+.total-breakdown {
+    max-width: 400px;
+    margin: 0 auto 2rem;
+}
+
+.breakdown-item {
+    display: flex;
+    justify-content: space-between;
+    padding: 0.75rem 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 1rem;
+}
+
+.breakdown-item.grand-total {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--primary);
+    border-bottom: none;
+    border-top: 2px solid var(--primary);
+    margin-top: 0.5rem;
+    padding-top: 1rem;
+}
+
+.form-actions {
+    display: flex;
+    gap: 1rem;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
+/* Buttons */
+.btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.875rem 1.75rem;
+    border: none;
+    border-radius: var(--radius-sm);
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-decoration: none;
+    font-family: inherit;
+}
+
+.btn-primary {
+    background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+    color: white;
+    box-shadow: 0 4px 12px rgba(46, 125, 50, 0.3);
+}
+
+.btn-primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(46, 125, 50, 0.4);
+}
+
+.btn-calculate {
+    background: white;
+    color: var(--primary);
+    border: 2px solid var(--primary);
+}
+
+.btn-calculate:hover {
+    background: var(--primary);
+    color: white;
+}
+
+.btn-secondary {
+    background: #e0e0e0;
+    color: var(--text);
+    padding: 0.5rem 1rem;
+    font-size: 0.875rem;
+}
+
+.btn-secondary:hover {
+    background: #d0d0d0;
+}
+
+.btn-outline {
+    background: transparent;
+    color: white;
+    border: 2px solid rgba(255,255,255,0.5);
+    padding: 0.5rem 1rem;
+    font-size: 0.875rem;
+}
+
+.btn-outline:hover {
+    background: rgba(255,255,255,0.1);
+    border-color: white;
+}
+
+/* Loading Overlay */
+.loading-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(255,255,255,0.95);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+.spinner {
+    width: 50px;
+    height: 50px;
+    border: 4px solid var(--border);
+    border-top-color: var(--primary);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-bottom: 1rem;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+/* Footer */
+.main-footer {
+    background: var(--text);
+    color: rgba(255,255,255,0.8);
+    text-align: center;
+    padding: 2rem;
+    margin-top: auto;
+}
+
+.main-footer p {
+    margin-bottom: 0.5rem;
+}
+
+.footer-links a {
+    color: rgba(255,255,255,0.6);
+    text-decoration: none;
+    margin: 0 0.5rem;
+}
+
+.footer-links a:hover {
+    color: white;
+}
+
+/* Responsive */
+@media (max-width: 1024px) {
+    .main-layout {
+        flex-direction: column;
+    }
+    
+    .sidebar {
+        width: 100%;
+    }
+    
+    .services-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .fp-inputs {
+        width: 100%;
+        justify-content: center;
+        margin-top: 1rem;
+    }
+}
+
+@media (max-width: 640px) {
+    .main-header {
+        flex-direction: column;
+        gap: 1rem;
+        text-align: center;
+    }
+    
+    .form-row {
+        flex-direction: column;
+    }
+    
+    .service-card {
+        flex-direction: column;
+        text-align: center;
+    }
+    
+    .service-input {
+        width: 100%;
+    }
+}
