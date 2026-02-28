@@ -1,4 +1,4 @@
 Flask==3.0.0
-reportlab==4.0.0
+reportlab==4.0.4
 Pillow==10.0.0
-upstash-redis==1.0.0
+vercel-kv==1.0.0
